@@ -68,7 +68,7 @@ struct ProgressContext
 
         std::string elapsed = MakeDurationString((float)timeSpan.count());
 
-        float estimateMultiplier = std::max(100.0f / percentF, 1.0f);
+        float estimateMultiplier = (percentF > 0.0f) ? std::max(100.0f / percentF, 1.0f) : 1.0f;
         std::string estimate = MakeDurationString(estimateMultiplier * (float)timeSpan.count());
 
         // make the message

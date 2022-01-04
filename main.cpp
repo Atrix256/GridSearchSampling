@@ -20,6 +20,12 @@ struct Optimizer_Base
     static const size_t c_KEEP_COUNT = KEEP_COUNT;
     static const size_t c_STEP_SIZE = STEP_SIZE;
 
+    static void InitInput(TInput& input)
+    {
+        for (float& f : input)
+            f = 0.0f;
+    }
+
     static bool AdvanceInput(TInput& input)
     {
         for (float& f : input)
@@ -108,6 +114,7 @@ void Optimize(const char* baseName)
         bool report = (i == 0);
 
         typename Optimizer::TInput x;
+        typename Optimizer::InitInput(x);
         typename Optimizer::AdvanceInput(x, i);
 
         do
