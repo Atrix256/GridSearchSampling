@@ -5,6 +5,7 @@
 #include <direct.h>
 #include <array>
 #include <vector>
+#include <algorithm>
 
 #define SINGLE_THREADED() false
 
@@ -54,13 +55,13 @@ struct Optimizer_Base
                 result.score = FLT_MAX;
         }
 
-        void ProcessResult(const Result& newResult)
+        void ProcessResult(const TInput& input, float score)
         {
             for (Result& oldResult : results)
             {
-                if (newResult.score < oldResult.score)
+                if (score < oldResult.score)
                 {
-                    oldResult = newResult;
+                    oldResult = { input, score };
                     return;
                 }
             }
@@ -105,13 +106,13 @@ void Optimize(const char* baseName)
         bool report = (i == 0);
 
         typename Optimizer::TInput x;
-        typename Optimizer::AdvanceInput(x, i);
+        typename Optimizer::AdvanceInput(x, i); // TODO: this is multiplied by step, should it be?
 
         do
         {
             // TODO: do thing.
             float y = Optimizer::Score(x);
-            threadData[i].ProcessResult({x,y});
+            threadData[i].ProcessResult(x, y);
 
             if (report)
             {
@@ -134,9 +135,15 @@ void Optimize(const char* baseName)
     for (typename Optimizer::PerThreadData& data : threadData)
     {
         for (const auto& result : data.results)
-            finalData.ProcessResult(result);
+            finalData.ProcessResult(result.input, result.score);
     }
-    // TODO: sort
+
+    // sort results
+    std::sort(
+        finalData.results.begin(),
+        finalData.results.end(),
+        [](const auto& a, const auto& b) { return a.score < b.score; }
+    );
 
     // Write results csv
     char fileName[1024];
