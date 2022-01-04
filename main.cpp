@@ -110,12 +110,28 @@ struct Optimizer_Base
 
         void ProcessResult(const TInput& input, float score)
         {
-            for (Result& oldResult : results)
+            // Index 0 is always the highest score.
+            // Keep this value only if it's less than the highest score.
+            // Then, find and swap to the new highest score
+
+            if (results[0].score > score)
             {
-                if (score < oldResult.score)
+                results[0] = { input, score };
+                int largestScoreIndex = 0;
+                float largestScore = score;
+                for (int i = 1; i < results.size(); ++i)
                 {
-                    oldResult = { input, score };
-                    return;
+                    if (results[i].score > largestScore)
+                    {
+                        largestScoreIndex = i;
+                        largestScore = results[i].score;
+                    }
+                }
+                if (largestScoreIndex > 0)
+                {
+                    Result temp = results[0];
+                    results[0] = results[largestScoreIndex];
+                    results[largestScoreIndex] = temp;
                 }
             }
         }
