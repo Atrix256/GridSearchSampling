@@ -7,6 +7,8 @@
 #include <vector>
 #include <algorithm>
 
+#include "progress.h"
+
 #define SINGLE_THREADED() false
 
 template <size_t INPUT_DIMENSIONS, size_t STEP_SIZE, size_t KEEP_COUNT>
@@ -96,7 +98,7 @@ void Optimize(const char* baseName)
 
     printf("%s - %u threads...\n", baseName, numThreads);
 
-    int lastPercent = -1;
+    ProgressContext progress;
 
     std::vector<Optimizer::PerThreadData> threadData(numThreads);
 
@@ -116,18 +118,12 @@ void Optimize(const char* baseName)
             if (report)
             {
                 // TODO: this is not linear, nor multidimensional
-
-                int percent = 0;// int(x * 10000);
-                if (percent != lastPercent)
-                {
-                    lastPercent = percent;
-                    printf("\r%0.2f%%", float(percent) / 100.0f);
-                }
+                progress.Report(int(x[0] * 100.0f), 100);
             }
         }
         while (Optimizer::AdvanceInput(x, numThreads));
     }
-    printf("\r100%%");
+    progress.Report(1, 1);
 
     // Collect the N winners from the multiple threads
     typename Optimizer::PerThreadData finalData;
