@@ -73,6 +73,7 @@ struct Optimizer_Base
 
     static bool AdvanceInput(TInput& input, int count)
     {
+        count *= c_STEP_SIZE;
         for (float& f : input)
         {
             uint32_t u = *reinterpret_cast<uint32_t*>(&f);
@@ -224,3 +225,17 @@ int main(int argc, char** argv)
 
     return 0;
 }
+
+/*
+TODO:
+* come up with compelling things to optimize for and see how they do
+ * 1D - 1d blue noise?
+ * 2D - IGN? blue noise? plus shape sampling?
+ * 3D - spatiotemporal something?
+
+Notes:
+* uses as many threads as available.
+* you can have it step by more than 1 to take sparser samples and go faster.
+
+
+*/
