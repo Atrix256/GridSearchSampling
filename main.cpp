@@ -106,11 +106,10 @@ void Optimize(const char* baseName)
         bool report = (i == 0);
 
         typename Optimizer::TInput x;
-        typename Optimizer::AdvanceInput(x, i); // TODO: this is multiplied by step, should it be?
+        typename Optimizer::AdvanceInput(x, i);
 
         do
         {
-            // TODO: do thing.
             float y = Optimizer::Score(x);
             threadData[i].ProcessResult(x, y);
 
