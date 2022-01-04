@@ -17,8 +17,14 @@ struct Optimizer_Base
     static const size_t c_INPUT_DIMENSIONS = 1;
     using TInput = std::array<float, c_INPUT_DIMENSIONS>;
 
-    static const size_t c_KEEP_COUNT = KEEP_COUNT;
-    static const size_t c_STEP_SIZE = STEP_SIZE;
+    inline static const size_t c_KEEP_COUNT = KEEP_COUNT;
+    inline static const size_t c_STEP_SIZE = STEP_SIZE;
+
+    inline static const float s_startf = 0.0f;
+    inline static const float s_endf = 1.0f;
+
+    inline static uint32_t s_start = *reinterpret_cast<const uint32_t*>(&s_startf);
+    inline static uint32_t s_end = *reinterpret_cast<const uint32_t*>(&s_endf);
 
     static void InitInput(TInput& input)
     {
@@ -26,11 +32,26 @@ struct Optimizer_Base
             f = 0.0f;
     }
 
+    static float GetInputPercent(const TInput& input)
+    {
+        float ret = 0.0f;
+        float divider = 0.01f;
+        for (const float& f : input)
+        {
+            uint32_t u = *reinterpret_cast<const uint32_t*>(&f);
+            ret += (float(u - s_start) / float(s_end - s_start)) / divider;
+
+            divider *= 100.0f;
+        }
+        return ret;
+    }
+
+#if 0
+    // Note: this is A LOT slower than the #else way
     static bool AdvanceInput(TInput& input)
     {
         for (float& f : input)
         {
-            // TODO: try doing this more directly with bits
             f = std::nextafter(f, 1.0f);
             if (f < 1.0f)
                 return true;
@@ -48,6 +69,29 @@ struct Optimizer_Base
         }
         return true;
     }
+#else
+
+    static bool AdvanceInput(TInput& input, int count)
+    {
+        for (float& f : input)
+        {
+            uint32_t u = *reinterpret_cast<uint32_t*>(&f);
+            u += count;
+            if (u < s_end)
+            {
+                f = *reinterpret_cast<float*>(&u);
+                return true;
+            }
+
+            u = s_start;
+            count = 1 + s_end - u;
+
+            f = *reinterpret_cast<float*>(&u);
+        }
+        return false;
+    }
+
+#endif
 
     struct PerThreadData
     {
@@ -124,8 +168,8 @@ void Optimize(const char* baseName)
 
             if (report)
             {
-                // TODO: this is not linear, nor multidimensional
-                progress.Report(int(x[0] * 100.0f), 100);
+                float f = typename Optimizer::GetInputPercent(x);
+                progress.Report(int(f * 10.0f), 1000);
             }
         }
         while (Optimizer::AdvanceInput(x, numThreads));
