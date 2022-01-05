@@ -14,16 +14,13 @@
 template <size_t INPUT_DIMENSIONS, size_t STEP_SIZE, size_t KEEP_COUNT>
 struct Optimizer_Base
 {
-    static const size_t c_INPUT_DIMENSIONS = 1;
+    static const size_t c_INPUT_DIMENSIONS = INPUT_DIMENSIONS;
     using TInput = std::array<float, c_INPUT_DIMENSIONS>;
 
     inline static const size_t c_KEEP_COUNT = KEEP_COUNT;
     inline static const size_t c_STEP_SIZE = STEP_SIZE;
 
-    inline static const float s_startf = 0.0f;
     inline static const float s_endf = 1.0f;
-
-    inline static uint32_t s_start = *reinterpret_cast<const uint32_t*>(&s_startf);
     inline static uint32_t s_end = *reinterpret_cast<const uint32_t*>(&s_endf);
 
     static void InitInput(TInput& input)
@@ -34,42 +31,23 @@ struct Optimizer_Base
 
     static float GetInputPercent(const TInput& input)
     {
+        float f = input[input.size() - 1];
+        uint32_t u = *reinterpret_cast<const uint32_t*>(&f);
+        return 100.0f * (float(u) / float(s_end));
+
+
+        /*
         float ret = 0.0f;
         float divider = 0.01f;
-        for (const float& f : input)
+        for (int i = (int)input.size() - 1; i >= 0; --i)
         {
-            uint32_t u = *reinterpret_cast<const uint32_t*>(&f);
+            uint32_t u = *reinterpret_cast<const uint32_t*>(&input[i]);
             ret += (float(u - s_start) / float(s_end - s_start)) / divider;
-
             divider *= 100.0f;
         }
         return ret;
+        */
     }
-
-#if 0
-    // Note: this is A LOT slower than the #else way
-    static bool AdvanceInput(TInput& input)
-    {
-        for (float& f : input)
-        {
-            f = std::nextafter(f, 1.0f);
-            if (f < 1.0f)
-                return true;
-            f = 0.0f;
-        }
-        return false;
-    }
-
-    static bool AdvanceInput(TInput& input, int count)
-    {
-        for (int i = 0; i < count * c_STEP_SIZE; ++i)
-        {
-            if (!AdvanceInput(input))
-                return false;
-        }
-        return true;
-    }
-#else
 
     static bool AdvanceInput(TInput& input, int count)
     {
@@ -84,15 +62,13 @@ struct Optimizer_Base
                 return true;
             }
 
-            u = s_start;
-            count = 1 + s_end - u;
+            count = 1;
+            u = u % s_end;
 
             f = *reinterpret_cast<float*>(&u);
         }
         return false;
     }
-
-#endif
 
     struct PerThreadData
     {
@@ -108,30 +84,41 @@ struct Optimizer_Base
                 result.score = FLT_MAX;
         }
 
-        void ProcessResult(const TInput& input, float score)
+        inline void ProcessResult(const TInput& input, float score)
         {
-            // Index 0 is always the highest score.
-            // Keep this value only if it's less than the highest score.
-            // Then, find and swap to the new highest score
-
-            if (results[0].score > score)
+            if (c_KEEP_COUNT == 1)
             {
-                results[0] = { input, score };
-                int largestScoreIndex = 0;
-                float largestScore = score;
-                for (int i = 1; i < results.size(); ++i)
+                if (score < results[0].score)
                 {
-                    if (results[i].score > largestScore)
-                    {
-                        largestScoreIndex = i;
-                        largestScore = results[i].score;
-                    }
+                    results[0].input = input;
+                    results[0].score = score;
                 }
-                if (largestScoreIndex > 0)
+            }
+            else
+            {
+                // Index 0 is always the highest score.
+                // Keep this value only if it's less than the highest score.
+                // Then, find and swap to the new highest score
+
+                if (results[0].score > score)
                 {
-                    Result temp = results[0];
-                    results[0] = results[largestScoreIndex];
-                    results[largestScoreIndex] = temp;
+                    results[0] = { input, score };
+                    int largestScoreIndex = 0;
+                    float largestScore = score;
+                    for (int i = 1; i < results.size(); ++i)
+                    {
+                        if (results[i].score > largestScore)
+                        {
+                            largestScoreIndex = i;
+                            largestScore = results[i].score;
+                        }
+                    }
+                    if (largestScoreIndex > 0)
+                    {
+                        Result temp = results[0];
+                        results[0] = results[largestScoreIndex];
+                        results[largestScoreIndex] = temp;
+                    }
                 }
             }
         }
@@ -146,9 +133,21 @@ struct Optimize_1D : public Optimizer_Base<1, STEP_SIZE, KEEP_COUNT>
     using TBase = Optimizer_Base<1, STEP_SIZE, KEEP_COUNT>;
     using TInput = TBase::TInput;
 
-    static float Score(const TInput& input)
+    static inline float Score(const TInput& input)
     {
         return std::abs(input[0] - 0.5f);
+    }
+};
+
+template <size_t STEP_SIZE, size_t KEEP_COUNT>
+struct Optimize_2D : public Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>
+{
+    using TBase = Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>;
+    using TInput = TBase::TInput;
+
+    static inline float Score(const TInput& input)
+    {
+        return std::abs((input[0] * input[1]) - 0.618f);
     }
 };
 
@@ -176,6 +175,7 @@ void Optimize(const char* baseName)
 
         typename Optimizer::TInput x;
         typename Optimizer::InitInput(x);
+
         typename Optimizer::AdvanceInput(x, i);
 
         do
@@ -186,7 +186,7 @@ void Optimize(const char* baseName)
             if (report)
             {
                 float f = typename Optimizer::GetInputPercent(x);
-                progress.Report(int(f * 10.0f), 1000);
+                progress.Report(int(f * 100.0f), 10000);
             }
         }
         while (Optimizer::AdvanceInput(x, numThreads));
@@ -237,7 +237,8 @@ int main(int argc, char** argv)
 {
     _mkdir("out");
 
-    Optimize<Optimize_1D<1, 5>>("test");
+    //Optimize<Optimize_1D<1, 5>>("test1d");
+    Optimize<Optimize_2D<65536, 1>>("test2d");
 
     return 0;
 }
