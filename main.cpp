@@ -23,12 +23,6 @@ struct Optimizer_Base
     inline static const float s_endf = 1.0f;
     inline static uint32_t s_end = *reinterpret_cast<const uint32_t*>(&s_endf);
 
-    static void InitInput(TInput& input)
-    {
-        for (float& f : input)
-            f = 0.0f;
-    }
-
     static float GetInputPercent(const TInput& input)
     {
         float f = input[input.size() - 1];
@@ -47,27 +41,6 @@ struct Optimizer_Base
         }
         return ret;
         */
-    }
-
-    static bool AdvanceInput(TInput& input, int count)
-    {
-        count *= c_STEP_SIZE;
-        for (float& f : input)
-        {
-            uint32_t u = *reinterpret_cast<uint32_t*>(&f);
-            u += count;
-            if (u < s_end)
-            {
-                f = *reinterpret_cast<float*>(&u);
-                return true;
-            }
-
-            count = 1;
-            u = u % s_end;
-
-            f = *reinterpret_cast<float*>(&u);
-        }
-        return false;
     }
 
     struct PerThreadData
@@ -151,6 +124,41 @@ struct Optimize_2D : public Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>
     }
 };
 
+template <typename Optimizer, size_t INDEX>
+void IterateInput(typename Optimizer::TInput& input, float min, float max, typename Optimizer::PerThreadData& threadData)
+{
+    bool report = (INDEX == 0 && min == 0.0f);
+
+    ProgressContext progress;
+
+    input[INDEX] = min;
+    while (input[INDEX] < max)
+    {
+        if (INDEX < Optimizer::c_INPUT_DIMENSIONS - 1)
+        {
+            IterateInput<Optimizer, INDEX + 1>(input, 0.0f, 1.0f, threadData);
+        }
+        else
+        {
+            float y = Optimizer::Score(input);
+            threadData.ProcessResult(input, y);
+        }
+
+        uint32_t u = *reinterpret_cast<uint32_t*>(&input[INDEX]);
+        u += Optimizer::c_STEP_SIZE;
+        input[INDEX] = *reinterpret_cast<float*>(&u);
+
+        if (report)
+        {
+            float f = typename Optimizer::GetInputPercent(input);
+            progress.Report(int(f * 100.0f), 10000);
+        }
+    }
+
+    if (report)
+        progress.Report(1, 1);
+}
+
 template <typename Optimizer>
 void Optimize(const char* baseName)
 {
@@ -164,34 +172,18 @@ void Optimize(const char* baseName)
 
     printf("%s - %u threads...\n", baseName, numThreads);
 
-    ProgressContext progress;
-
     std::vector<Optimizer::PerThreadData> threadData(numThreads);
 
     #pragma omp parallel for
     for (int i = 0; i < (int)numThreads; ++i)
     {
-        bool report = (i == 0);
-
         typename Optimizer::TInput x;
-        typename Optimizer::InitInput(x);
 
-        typename Optimizer::AdvanceInput(x, i);
+        float min = float(i) / float(numThreads);
+        float max = float(i + 1) / float(numThreads);
 
-        do
-        {
-            float y = Optimizer::Score(x);
-            threadData[i].ProcessResult(x, y);
-
-            if (report)
-            {
-                float f = typename Optimizer::GetInputPercent(x);
-                progress.Report(int(f * 100.0f), 10000);
-            }
-        }
-        while (Optimizer::AdvanceInput(x, numThreads));
+        IterateInput<Optimizer, 0>(x, min, max, threadData[i]);
     }
-    progress.Report(1, 1);
 
     // Collect the N winners from the multiple threads
     typename Optimizer::PerThreadData finalData;
@@ -245,6 +237,9 @@ int main(int argc, char** argv)
 
 /*
 TODO:
+! in the 2D case, if you think of it as a double for loop, you are incrementing one by the step size, but not the other!
+ * maybe actually do a double for loop? have the inner most for loop divied up
+
 * come up with compelling things to optimize for and see how they do
  * 1D - 1d blue noise?
  * 2D - IGN? blue noise? plus shape sampling?
