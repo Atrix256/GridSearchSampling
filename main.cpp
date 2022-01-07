@@ -11,6 +11,15 @@
 
 #define SINGLE_THREADED() false
 
+static const float c_goldenRatio = 1.618033988749894f;
+static const float c_goldenRatioConjugate = 0.618033988749894f;
+
+template <typename T>
+T fract(const T& t)
+{
+    return t - floor(t);
+}
+
 template <size_t INPUT_DIMENSIONS, size_t STEP_SIZE, size_t KEEP_COUNT>
 struct Optimizer_Base
 {
@@ -94,14 +103,23 @@ struct Optimize_1D : public Optimizer_Base<1, STEP_SIZE, KEEP_COUNT>
 };
 
 template <size_t STEP_SIZE, size_t KEEP_COUNT>
-struct Optimize_2D : public Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>
+struct Optimize_2D_Coirrational : public Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>
 {
     using TBase = Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>;
     using TInput = TBase::TInput;
 
+    // Goal: find two values which are maximally irrational from each other and the golden ratio
     static inline float Score(const TInput& input)
     {
-        return std::abs((input[0] * input[1]) - 0.618f);
+        if (input[0] < 0.0001f || input[1] < 0.0001f)
+            return FLT_MAX;
+
+        float error1 = std::abs(fract(input[0] / input[1]) - c_goldenRatioConjugate);
+        float error2 = std::abs(fract(input[1] / input[0]) - c_goldenRatioConjugate);
+        float error3 = std::abs(fract(input[0] / c_goldenRatioConjugate) - c_goldenRatioConjugate);
+        float error4 = std::abs(fract(input[1] / c_goldenRatioConjugate) - c_goldenRatioConjugate);
+
+        return sqrt(error1 * error1 + error2 * error2 + error3 * error3 + error4 * error4);
     }
 };
 
@@ -113,7 +131,7 @@ struct Optimize_3D : public Optimizer_Base<3, STEP_SIZE, KEEP_COUNT>
 
     static inline float Score(const TInput& input)
     {
-        return std::abs((input[0] * input[1] * input[2]) - 0.618f);
+        return std::abs(fract(input[0] * input[1] * input[2]) - 0.618f);
     }
 };
 
@@ -257,9 +275,9 @@ int main(int argc, char** argv)
 {
     _mkdir("out");
 
-    Optimize<Optimize_1D<1, 5>>("test1d");
-    Optimize<Optimize_2D<1024 * 16, 5>>("test2d");
-    Optimize<Optimize_3D<1024 * 256, 5>>("test3d");
+    //Optimize<Optimize_1D<1, 5>>("test1d");
+    Optimize<Optimize_2D_Coirrational<1024 * 16, 5>>("coirrational");
+    //Optimize<Optimize_3D<1024 * 256, 5>>("test3d");
 
     return 0;
 }
@@ -268,6 +286,9 @@ int main(int argc, char** argv)
 TODO:
 
 * have an option for gradient descent on the winners
+* is there a way to optimize situations where x1 and x2 are interchangeable, so it decreases the search space?
+ * yeah. if they are interchangeable, inner loops start at the outer loop current value i think?
+ * it will also help find more unique solutions, which is nice
 
 * come up with compelling things to optimize for and see how they do
  * 1D - 1d blue noise?
@@ -277,6 +298,6 @@ TODO:
 Notes:
 * uses as many threads as available.
 * you can have it step by more than 1 to take sparser samples and go faster.
-
+* note how squaring error terms that are summed together promotes error being balanced across those terms, instead of lumped into one term.
 
 */
