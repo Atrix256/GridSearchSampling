@@ -23,26 +23,6 @@ struct Optimizer_Base
     inline static const float s_endf = 1.0f;
     inline static uint32_t s_end = *reinterpret_cast<const uint32_t*>(&s_endf);
 
-    static float GetInputPercent(const TInput& input)
-    {
-        float f = input[input.size() - 1];
-        uint32_t u = *reinterpret_cast<const uint32_t*>(&f);
-        return 100.0f * (float(u) / float(s_end));
-
-
-        /*
-        float ret = 0.0f;
-        float divider = 0.01f;
-        for (int i = (int)input.size() - 1; i >= 0; --i)
-        {
-            uint32_t u = *reinterpret_cast<const uint32_t*>(&input[i]);
-            ret += (float(u - s_start) / float(s_end - s_start)) / divider;
-            divider *= 100.0f;
-        }
-        return ret;
-        */
-    }
-
     struct PerThreadData
     {
         struct Result
@@ -59,6 +39,7 @@ struct Optimizer_Base
 
         inline void ProcessResult(const TInput& input, float score)
         {
+            // special case known at compile time, for if we are only keeping one
             if (c_KEEP_COUNT == 1)
             {
                 if (score < results[0].score)
@@ -124,34 +105,73 @@ struct Optimize_2D : public Optimizer_Base<2, STEP_SIZE, KEEP_COUNT>
     }
 };
 
-template <typename Optimizer, size_t INDEX>
-void IterateInput(typename Optimizer::TInput& input, float min, float max, typename Optimizer::PerThreadData& threadData)
+template <size_t STEP_SIZE, size_t KEEP_COUNT>
+struct Optimize_3D : public Optimizer_Base<3, STEP_SIZE, KEEP_COUNT>
 {
-    bool report = (INDEX == 0 && min == 0.0f);
+    using TBase = Optimizer_Base<3, STEP_SIZE, KEEP_COUNT>;
+    using TInput = TBase::TInput;
 
-    ProgressContext progress;
-
-    input[INDEX] = min;
-    while (input[INDEX] < max)
+    static inline float Score(const TInput& input)
     {
-        if (INDEX < Optimizer::c_INPUT_DIMENSIONS - 1)
+        return std::abs((input[0] * input[1] * input[2]) - 0.618f);
+    }
+};
+
+inline bool AdvanceFloat(float& f, uint32_t stepCount, float max)
+{
+    uint32_t maxu = *reinterpret_cast<uint32_t*>(&max);
+
+    uint32_t u = *reinterpret_cast<uint32_t*>(&f);
+    u += stepCount;
+    bool ret = u < maxu;
+    u %= maxu;
+    f = *reinterpret_cast<float*>(&u);
+
+    return ret;
+}
+
+template <typename Optimizer>
+void IterateInput(typename Optimizer::TInput& input, float min, float max, typename Optimizer::PerThreadData& threadData, int threadId)
+{
+    ProgressContext progress;
+    bool report = (threadId == 0);
+
+    uint32_t minu = *reinterpret_cast<uint32_t*>(&min);
+    uint32_t maxu = *reinterpret_cast<uint32_t*>(&max);
+
+    // initialize the input
+    input[0] = min;
+    for (int i = 1; i < Optimizer::c_INPUT_DIMENSIONS; ++i)
+        input[i] = 0.0f;
+
+    // loop until we are done with this slice of input
+    while (true)
+    {
+        // process this input value
+        float y = Optimizer::Score(input);
+        threadData.ProcessResult(input, y);
+
+        // advance to the next input value if we can
+        bool couldIterate = false;
+        for (int i = Optimizer::c_INPUT_DIMENSIONS - 1; i >= 0; --i)
         {
-            IterateInput<Optimizer, INDEX + 1>(input, 0.0f, 1.0f, threadData);
-        }
-        else
-        {
-            float y = Optimizer::Score(input);
-            threadData.ProcessResult(input, y);
+            if (AdvanceFloat(input[i], Optimizer::c_STEP_SIZE, (i == 0) ? max : 1.0f))
+            {
+                couldIterate = true;
+                break;
+            }
         }
 
-        uint32_t u = *reinterpret_cast<uint32_t*>(&input[INDEX]);
-        u += Optimizer::c_STEP_SIZE;
-        input[INDEX] = *reinterpret_cast<float*>(&u);
+        // exit if we are done
+        if (!couldIterate)
+            break;
 
+        // report progress
         if (report)
         {
-            float f = typename Optimizer::GetInputPercent(input);
-            progress.Report(int(f * 100.0f), 10000);
+            uint32_t currentu = *reinterpret_cast<uint32_t*>(&input[0]);
+            float f = float(currentu - minu) / float(maxu - minu);
+            progress.Report(int(f * 10000.0f), 10000);
         }
     }
 
@@ -179,10 +199,12 @@ void Optimize(const char* baseName)
     {
         typename Optimizer::TInput x;
 
-        float min = float(i) / float(numThreads);
-        float max = float(i + 1) / float(numThreads);
+        uint32_t minu = uint32_t(float(Optimizer::s_end) * float(i) / float(numThreads));
+        uint32_t maxu = uint32_t(float(Optimizer::s_end) * float(i+1) / float(numThreads));
+        float min = *reinterpret_cast<float*>(&minu);
+        float max = *reinterpret_cast<float*>(&maxu);
 
-        IterateInput<Optimizer, 0>(x, min, max, threadData[i]);
+        IterateInput<Optimizer>(x, min, max, threadData[i], i);
     }
 
     // Collect the N winners from the multiple threads
@@ -209,7 +231,10 @@ void Optimize(const char* baseName)
     // write header
     for (int i = 0; i < Optimizer::c_INPUT_DIMENSIONS; ++i)
         fprintf(file, "\"x%i\",", i);
+    for (int i = 0; i < Optimizer::c_INPUT_DIMENSIONS; ++i)
+        fprintf(file, "\"x%i as uint32\",", i);
     fprintf(file, "\"score\"\n");
+    fprintf(file, "\"score as uint32\"\n");
 
     // write data rows
     for (const auto& result : finalData.results)
@@ -219,7 +244,10 @@ void Optimize(const char* baseName)
 
         for (int i = 0; i < Optimizer::c_INPUT_DIMENSIONS; ++i)
             fprintf(file, "\"%f\",", result.input[i]);
+        for (int i = 0; i < Optimizer::c_INPUT_DIMENSIONS; ++i)
+            fprintf(file, "\"%u\",", *reinterpret_cast<const uint32_t*>(&result.input[i]));
         fprintf(file, "\"%f\"\n", result.score);
+        fprintf(file, "\"%u\"\n", *reinterpret_cast<const uint32_t*>(&result.score));
     }
 
     fclose(file);
@@ -229,16 +257,17 @@ int main(int argc, char** argv)
 {
     _mkdir("out");
 
-    //Optimize<Optimize_1D<1, 5>>("test1d");
-    Optimize<Optimize_2D<65536, 1>>("test2d");
+    Optimize<Optimize_1D<1, 5>>("test1d");
+    Optimize<Optimize_2D<1024 * 16, 5>>("test2d");
+    Optimize<Optimize_3D<1024 * 256, 5>>("test3d");
 
     return 0;
 }
 
 /*
 TODO:
-! in the 2D case, if you think of it as a double for loop, you are incrementing one by the step size, but not the other!
- * maybe actually do a double for loop? have the inner most for loop divied up
+
+* have an option for gradient descent on the winners
 
 * come up with compelling things to optimize for and see how they do
  * 1D - 1d blue noise?

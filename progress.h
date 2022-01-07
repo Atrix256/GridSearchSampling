@@ -74,7 +74,7 @@ struct ProgressContext
         // make the message
         char buffer[1024];
         if (count == total)
-            sprintf_s(buffer, "\r100%%  elapsed %s", elapsed.c_str());
+            sprintf_s(buffer, "\r100.0%%  elapsed %s", elapsed.c_str());
         else
             sprintf_s(buffer, "\r%0.1f%%  elapsed %s  estimated %s", float(percentx10) / 10.0f, elapsed.c_str(), estimate.c_str());
 
